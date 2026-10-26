@@ -293,21 +293,23 @@ impl Deref for SignedAuthorization {
 #[cfg(all(any(test, feature = "arbitrary"), feature = "k256"))]
 impl<'a> arbitrary::Arbitrary<'a> for SignedAuthorization {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        use k256::{
-            NonZeroScalar,
-            ecdsa::{SigningKey, signature::hazmat::PrehashSigner},
-        };
-        use rand::{SeedableRng, rngs::StdRng};
+        use k256::ecdsa::SigningKey;
+        use rand::{RngCore, SeedableRng, rngs::StdRng};
 
-        let rng_seed = u.arbitrary::<[u8; 32]>()?;
-        let mut rand_gen = StdRng::from_seed(rng_seed);
-        let signing_key: SigningKey = NonZeroScalar::random(&mut rand_gen).into();
+        let mut rand_gen = StdRng::from_seed(u.arbitrary::<[u8; 32]>()?);
+        let signing_key = loop {
+            let mut bytes = [0; 32];
+            rand_gen.fill_bytes(&mut bytes);
+            if let Ok(key) = SigningKey::from_slice(&bytes) {
+                break key;
+            }
+        };
 
         let inner = u.arbitrary::<Authorization>()?;
         let signature_hash = inner.signature_hash();
 
         let (recoverable_sig, recovery_id) =
-            signing_key.sign_prehash(signature_hash.as_ref()).unwrap();
+            signing_key.sign_prehash_recoverable(signature_hash.as_ref());
         let signature =
             Signature::from_signature_and_parity(recoverable_sig, recovery_id.is_y_odd());
 
